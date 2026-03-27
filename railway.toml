@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python -m src.main"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Health check — Railway pings this to confirm the service is up.
+# python-telegram-bot's webhook server serves GET /health when configured.
+[deploy.healthcheck]
+path = "/health"
+intervalSeconds = 30
+timeoutSeconds = 10
