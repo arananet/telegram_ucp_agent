@@ -13,8 +13,10 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from src.bot.states import State
+from src.bot.handlers.oauth import cmd_link
 from src.ucp.client import UCPClient, UCPError
 from src.ucp.discovery import fetch_manifest
+from src.oauth.service import OAuthService
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     manifest = await fetch_manifest(ucp)
 
     greeting = [f"Welcome{', ' + user.first_name if user.first_name else ''}! 🛍"]
+    prompt_link = False
 
     if manifest:
         business = manifest.business
@@ -58,9 +61,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             greeting.append("Merchant capabilities:")
             greeting.extend(capability_lines)
 
+    oauth_service: OAuthService | None = context.bot_data.get("oauth_service")
+    if oauth_service:
+        token = await oauth_service.ensure_token(user.id)
+        if token:
+            greeting.append("Your store account is linked — I'll autofill checkout details.")
+        else:
+            greeting.append(
+                "Your store account is not linked yet. Link it below to skip manual address entry."
+            )
+            prompt_link = True
+
     greeting.append("Let me fetch the product catalog for you…")
 
     await update.message.reply_text("\n".join(greeting))
+    if prompt_link:
+        await cmd_link(update, context)
 
     # Delegate to catalog to render products
     from src.bot.handlers.catalog import show_catalog

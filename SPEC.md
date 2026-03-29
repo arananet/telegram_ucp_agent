@@ -81,6 +81,10 @@ The bot runs on [Railway](https://railway.app) in **webhook mode** (production) 
 Standalone commands:
 - `/link` → Initiates OAuth PKCE flow in DM; not part of ConversationHandler
 - `/unlink` → Revokes stored OAuth tokens and clears linked profile
+- `/start` double-checks whether the user has a stored OAuth token whenever the OAuth
+  service is configured. If not, it immediately sends the same linking prompt as `/link`
+  right after the welcome message so shoppers can authorize their store accounts before
+  proceeding.
 ```
 
 ### 2.2 State Definitions
