@@ -36,12 +36,31 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     # Attempt manifest discovery (non-fatal)
     ucp: UCPClient = context.bot_data["ucp_client"]
-    await fetch_manifest(ucp)
+    manifest = await fetch_manifest(ucp)
 
-    await update.message.reply_text(
-        f"Welcome{', ' + user.first_name if user.first_name else ''}! 🛍\n"
-        "Let me fetch the product catalog for you…"
-    )
+    greeting = [f"Welcome{', ' + user.first_name if user.first_name else ''}! 🛍"]
+
+    if manifest:
+        business = manifest.business
+        store_line = f"You are shopping with {business.name}"
+        if business.homepage:
+            store_line += f" ({business.homepage})"
+        greeting.append(store_line)
+
+        capability_lines: list[str] = []
+        for service in manifest.services:
+            caps = ", ".join(sorted(service.capabilities)) or "No capabilities advertised"
+            capability_lines.append(
+                f"• {service.id}: {caps}"
+            )
+
+        if capability_lines:
+            greeting.append("Merchant capabilities:")
+            greeting.extend(capability_lines)
+
+    greeting.append("Let me fetch the product catalog for you…")
+
+    await update.message.reply_text("\n".join(greeting))
 
     # Delegate to catalog to render products
     from src.bot.handlers.catalog import show_catalog
