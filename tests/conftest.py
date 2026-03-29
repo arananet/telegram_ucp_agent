@@ -64,16 +64,24 @@ def sample_checkout_session() -> dict:
         ],
         "fulfillment": [
             {
-                "id": "shipping_1",
-                "type": "shipping",
-                "label": "Standard Shipping",
-                "cost": 5.00,
+                "id": "block_1",
                 "methods": [
                     {
-                        "id": "flat_rate_1",
-                        "label": "Flat Rate",
-                        "cost": 5.00,
-                        "selected": True,
+                        "id": "shipping_1",
+                        "line_item_ids": ["li_1"],
+                        "groups": [
+                            {
+                                "id": "package_1",
+                                "options": [
+                                    {
+                                        "id": "flat_rate_1",
+                                        "label": "Flat Rate",
+                                        "amount": "5.00",
+                                    }
+                                ],
+                                "selected_option_id": "flat_rate_1",
+                            }
+                        ],
                     }
                 ],
             }

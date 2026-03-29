@@ -82,15 +82,18 @@ def cart_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def shipping_keyboard(fulfillment_groups: list[Fulfillment]) -> InlineKeyboardMarkup:
+def shipping_keyboard(fulfillment_blocks: list[Fulfillment], currency: str = "USD") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
-    for group in fulfillment_groups:
-        for method in group.methods:
-            label = f"{method.label} — ${method.cost:.2f}"
-            rows.append([
-                InlineKeyboardButton(label, callback_data=f"ship_{method.id}")
-            ])
+    for block in fulfillment_blocks:
+        for method in block.methods:
+            for group in method.groups:
+                for option in group.options:
+                    label = f"{option.label} — {currency} {option.amount:.2f}"
+                    callback_data = f"ship_{method.id}|{group.id}|{option.id}"
+                    rows.append([
+                        InlineKeyboardButton(label, callback_data=callback_data)
+                    ])
 
     rows.append([InlineKeyboardButton("◀ Edit address", callback_data="action_back")])
     return InlineKeyboardMarkup(rows)

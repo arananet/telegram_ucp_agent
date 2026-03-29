@@ -15,26 +15,33 @@ from src.ucp.client import UCPClient, UCPError
 from src.ucp.models import CheckoutRequest, LineItemRequest
 
 
-BASE = "https://example.com"
+BASE = "https://example.com/wp-json/ucp/v1"
+DISCOVERY = "https://example.com/.well-known/ucp"
+PRODUCTS = f"{BASE}/products"
+CHECKOUT = f"{BASE}/checkout-sessions"
 
 
 @pytest.fixture
 def client():
-    return UCPClient(merchant_url=BASE, api_key="test_key")
+    return UCPClient(
+        merchant_url=BASE,
+        api_key="test_key",
+        customer_profile_url=f"{BASE}/customers/me",
+    )
 
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
 
 @respx.mock
 async def test_discover_success(client, sample_manifest):
-    respx.get(f"{BASE}/.well-known/ucp").mock(return_value=Response(200, json=sample_manifest))
+    respx.get(DISCOVERY).mock(return_value=Response(200, json=sample_manifest))
     manifest = await client.discover()
     assert manifest.business.name == "Test Store"
 
 
 @respx.mock
 async def test_discover_no_auth_header(client, sample_manifest):
-    route = respx.get(f"{BASE}/.well-known/ucp").mock(return_value=Response(200, json=sample_manifest))
+    route = respx.get(DISCOVERY).mock(return_value=Response(200, json=sample_manifest))
     await client.discover()
     assert "X-API-Key" not in route.calls[0].request.headers
 
@@ -43,7 +50,7 @@ async def test_discover_no_auth_header(client, sample_manifest):
 
 @respx.mock
 async def test_list_products_success(client, sample_products_response):
-    respx.get(f"{BASE}/wp-json/ucp/v1/products").mock(
+    respx.get(PRODUCTS).mock(
         return_value=Response(200, json=sample_products_response)
     )
     result = await client.list_products()
@@ -53,7 +60,7 @@ async def test_list_products_success(client, sample_products_response):
 
 @respx.mock
 async def test_list_products_passes_params(client, sample_products_response):
-    route = respx.get(f"{BASE}/wp-json/ucp/v1/products").mock(
+    route = respx.get(PRODUCTS).mock(
         return_value=Response(200, json=sample_products_response)
     )
     await client.list_products(page=2, per_page=5, search="widget")
@@ -67,7 +74,7 @@ async def test_list_products_passes_params(client, sample_products_response):
 
 @respx.mock
 async def test_create_checkout_session_sends_api_key(client, sample_checkout_session):
-    route = respx.post(f"{BASE}/wp-json/ucp/v1/checkout-sessions").mock(
+    route = respx.post(CHECKOUT).mock(
         return_value=Response(201, json=sample_checkout_session)
     )
     req = CheckoutRequest(line_items=[LineItemRequest(id=42, quantity=1)])
@@ -77,7 +84,7 @@ async def test_create_checkout_session_sends_api_key(client, sample_checkout_ses
 
 @respx.mock
 async def test_create_checkout_session_body_shape(client, sample_checkout_session):
-    route = respx.post(f"{BASE}/wp-json/ucp/v1/checkout-sessions").mock(
+    route = respx.post(CHECKOUT).mock(
         return_value=Response(201, json=sample_checkout_session)
     )
     req = CheckoutRequest(line_items=[LineItemRequest(id=42, quantity=2)])
@@ -87,8 +94,25 @@ async def test_create_checkout_session_body_shape(client, sample_checkout_sessio
     import json
     payload = json.loads(body)
     assert "checkout" in payload
-    assert payload["checkout"]["line_items"][0]["id"] == 42
+    assert payload["checkout"]["line_items"][0]["item"]["id"] == "42"
     assert payload["checkout"]["line_items"][0]["quantity"] == 2
+
+
+@respx.mock
+async def test_select_fulfillment_option_sends_payload(client, sample_checkout_session):
+    route = respx.put(f"{CHECKOUT}/chk_abc123").mock(
+        return_value=Response(200, json=sample_checkout_session)
+    )
+
+    session = await client.select_fulfillment_option(
+        "chk_abc123", method_id="shipping_1", group_id="package_1", option_id="flat_rate_1"
+    )
+    body = route.calls[0].request.read()
+    import json
+
+    payload = json.loads(body)
+    assert payload["fulfillment"]["methods"][0]["groups"][0]["selected_option_id"] == "flat_rate_1"
+    assert session.id == "chk_abc123"
 
 
 # ── Complete Checkout Session ─────────────────────────────────────────────────
@@ -96,7 +120,7 @@ async def test_create_checkout_session_body_shape(client, sample_checkout_sessio
 @respx.mock
 async def test_complete_sends_empty_body_for_cod(client, sample_checkout_session):
     completed = dict(sample_checkout_session, status="completed")
-    route = respx.post(f"{BASE}/wp-json/ucp/v1/checkout-sessions/chk_abc123/complete").mock(
+    route = respx.post(f"{CHECKOUT}/chk_abc123/complete").mock(
         return_value=Response(200, json=completed)
     )
     session = await client.complete_checkout_session("chk_abc123")
@@ -110,7 +134,7 @@ async def test_complete_sends_empty_body_for_cod(client, sample_checkout_session
 
 @respx.mock
 async def test_error_400_raises_ucp_error(client):
-    respx.get(f"{BASE}/wp-json/ucp/v1/products").mock(
+    respx.get(PRODUCTS).mock(
         return_value=Response(400, json={"messages": [{"content": "bad request", "type": "validation", "code": "err", "severity": "fatal"}]})
     )
     with pytest.raises(UCPError) as exc_info:
@@ -121,7 +145,7 @@ async def test_error_400_raises_ucp_error(client):
 
 @respx.mock
 async def test_error_401_raises_ucp_error(client):
-    respx.post(f"{BASE}/wp-json/ucp/v1/checkout-sessions").mock(
+    respx.post(CHECKOUT).mock(
         return_value=Response(401, json={"error": "Invalid API key"})
     )
     req = CheckoutRequest(line_items=[LineItemRequest(id=1, quantity=1)])
@@ -132,7 +156,7 @@ async def test_error_401_raises_ucp_error(client):
 
 @respx.mock
 async def test_error_429_includes_retry_after(client):
-    respx.get(f"{BASE}/wp-json/ucp/v1/products").mock(
+    respx.get(PRODUCTS).mock(
         return_value=Response(429, json={"error": "rate limited"}, headers={"Retry-After": "30"})
     )
     with pytest.raises(UCPError) as exc_info:
@@ -143,10 +167,20 @@ async def test_error_429_includes_retry_after(client):
 
 @respx.mock
 async def test_error_500_raises_ucp_error(client):
-    respx.get(f"{BASE}/wp-json/ucp/v1/products").mock(
+    respx.get(PRODUCTS).mock(
         return_value=Response(500, json={})
     )
     with pytest.raises(UCPError) as exc_info:
         await client.list_products()
     assert exc_info.value.status_code == 500
     assert "unavailable" in exc_info.value.message.lower()
+
+
+@respx.mock
+async def test_get_customer_profile_uses_bearer(client):
+    route = respx.get(f"{BASE}/customers/me").mock(
+        return_value=Response(200, json={"id": 1, "email": "user@example.com"})
+    )
+    profile = await client.get_customer_profile("token_xyz")
+    assert profile["email"] == "user@example.com"
+    assert route.calls[0].request.headers["Authorization"] == "Bearer token_xyz"

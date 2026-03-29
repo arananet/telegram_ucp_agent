@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import logging
 
+import html
+import re
+
 from telegram import Update
+from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes
 
 from src.bot.keyboards import catalog_keyboard, product_detail_keyboard
@@ -98,21 +102,9 @@ async def on_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
     in_stock = product.stock_status == "instock"
     kb = product_detail_keyboard(product_id, in_stock=in_stock)
 
-    # Truncate description to avoid Telegram message length limits
-    description = product.description.strip()
-    if len(description) > 300:
-        description = description[:297] + "…"
-
-    stock_label = "In stock" if in_stock else "Out of stock"
-    text = (
-        f"*{product.title}*\n"
-        f"Price: *${product.price:.2f}*\n"
-        f"SKU: `{product.sku}`\n"
-        f"Status: {stock_label}\n\n"
-        f"{description}"
-    )
-
+    text = _format_product_text(product, in_stock)
     await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+    await _send_product_image(query, product)
     return State.PRODUCT_DETAIL
 
 
@@ -145,3 +137,44 @@ async def _reply(update: Update, text: str, **kwargs) -> None:
         await update.callback_query.edit_message_text(text, **kwargs)
     elif update.message:
         await update.message.reply_text(text, **kwargs)
+
+
+def _format_product_text(product, in_stock: bool) -> str:
+    title = escape_markdown(product.title, version=1)
+    sku = escape_markdown(product.sku, version=1)
+
+    description = product.description or ""
+    description = _strip_html(description)
+    description = escape_markdown(description, version=1)
+    if not description:
+        description = "No description available."
+    if len(description) > 600:
+        description = description[:597] + "…"
+
+    stock_label = "In stock" if in_stock else "Out of stock"
+
+    return (
+        f"*{title}*\n"
+        f"Price: *${product.price:.2f}*\n"
+        f"SKU: `{sku}`\n"
+        f"Status: {stock_label}\n\n"
+        f"{description}"
+    )
+
+
+def _strip_html(text: str) -> str:
+    clean = re.sub(r"<[^>]+>", "", text)
+    return html.unescape(clean).strip()
+
+
+async def _send_product_image(query, product) -> None:
+    if not product.images or not product.images.featured:
+        return
+
+    try:
+        await query.message.reply_photo(
+            product.images.featured,
+            caption=f"Image: {product.title}",
+        )
+    except Exception as exc:
+        logger.warning("Failed to send product image %s: %s", product.images.featured, exc)

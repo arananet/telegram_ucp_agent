@@ -23,6 +23,8 @@ _HELP_TEXT = (
     "Commands:\n"
     "/start — Open the product catalog\n"
     "/cancel — Cancel the current operation\n"
+    "/link — Connect your store account for autofill\n"
+    "/unlink — Remove the linked store account\n"
     "/help — Show this message"
 )
 

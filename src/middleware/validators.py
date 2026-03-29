@@ -16,6 +16,7 @@ import re
 _NAME_RE = re.compile(r"^[A-Za-z\s\-']{1,100}$")
 _POSTAL_RE = re.compile(r"^[A-Z0-9\s\-]{1,20}$", re.IGNORECASE)
 _COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 
 # ── Validators ────────────────────────────────────────────────────────────────
@@ -91,4 +92,14 @@ def validate_country(value: str) -> tuple[bool, str]:
     stripped = value.strip().upper() if value else ""
     if not _COUNTRY_RE.match(stripped):
         return False, "Country must be a 2-letter ISO code (e.g. US, MX, GB)."
+    return True, ""
+
+
+def validate_email(value: str) -> tuple[bool, str]:
+    """Basic email validation per RFC 5322 lite, max 254 chars."""
+    stripped = value.strip() if value else ""
+    if not stripped:
+        return False, "Email cannot be empty."
+    if len(stripped) > 254 or not _EMAIL_RE.match(stripped):
+        return False, "Enter a valid email address (e.g. name@example.com)."
     return True, ""

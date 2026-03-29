@@ -11,6 +11,7 @@ import pytest
 from src.middleware.validators import (
     validate_city,
     validate_country,
+    validate_email,
     validate_name,
     validate_postal_code,
     validate_product_id,
@@ -131,5 +132,24 @@ def test_country_valid(value):
 @pytest.mark.parametrize("value", ["", "USA", "1", "U", "u1"])
 def test_country_invalid(value):
     ok, err = validate_country(value)
+    assert not ok
+    assert err
+
+
+# ── Email ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("value", [
+    "user@example.com",
+    "first.last+tag@example.co.uk",
+    "name123@test.io",
+])
+def test_email_valid(value):
+    ok, _ = validate_email(value)
+    assert ok
+
+
+@pytest.mark.parametrize("value", ["", "   ", "invalid", "foo@bar", "user@", "@example.com"])
+def test_email_invalid(value):
+    ok, err = validate_email(value)
     assert not ok
     assert err

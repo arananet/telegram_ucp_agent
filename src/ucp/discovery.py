@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 import time
 
+from pydantic import ValidationError
+
 from src.ucp.client import UCPClient, UCPError
 from src.ucp.models import UCPManifest
 
@@ -39,6 +41,9 @@ async def fetch_manifest(client: UCPClient, *, force_refresh: bool = False) -> U
         manifest = await client.discover()
     except UCPError as exc:
         logger.warning("Could not fetch UCP manifest: %s", exc.message)
+        return _cached_manifest  # return stale cache if available
+    except ValidationError as exc:
+        logger.warning("Merchant returned invalid UCP manifest: %s", exc)
         return _cached_manifest  # return stale cache if available
 
     _cached_manifest = manifest

@@ -26,11 +26,11 @@ Its primary goal is **integration testing** of the [arananet/woocommerce_ucp_plu
 - Product discovery and browsing (paginated catalog)
 - Cart management (add/remove items, view cart)
 - Full checkout flow (shipping address → shipping method → confirmation → order placed)
+- Customer OAuth linking + profile autofill
 - UCP session lifecycle management (create → update → complete / cancel)
 - Railway-hosted webhook deployment
 
 **Out of scope:**
-- User account management / OAuth identity linking
 - Real-time order tracking (webhooks from merchant → user)
 - Multi-merchant discovery
 - Admin commands
@@ -77,6 +77,10 @@ The bot runs on [Railway](https://railway.app) in **webhook mode** (production) 
 
 [ORDER_DONE]
   └─ "Start Over"                    → [BROWSING]
+
+Standalone commands:
+- `/link` → Initiates OAuth PKCE flow in DM; not part of ConversationHandler
+- `/unlink` → Revokes stored OAuth tokens and clears linked profile
 ```
 
 ### 2.2 State Definitions
@@ -117,7 +121,7 @@ context.user_data = {
 
 ### 3.1 Merchant Discovery
 
-**Endpoint:** `GET {UCP_MERCHANT_URL}/.well-known/ucp`
+**Endpoint:** `GET {UCP_BASE_URL}/../.well-known/ucp` (auto-derived `UCP_DISCOVERY_URL`)
 **Auth:** None
 **When called:** Once on startup; result cached for 1 hour (in-memory).
 **Required capability:** `"checkout"` must appear in `services[0].capabilities`.
@@ -125,7 +129,7 @@ context.user_data = {
 
 ### 3.2 Product Catalog
 
-**Endpoint:** `GET {UCP_MERCHANT_URL}/wp-json/ucp/v1/products`
+**Endpoint:** `GET {UCP_BASE_URL}/products`
 **Auth:** None
 **Parameters used:**
 
@@ -139,7 +143,7 @@ context.user_data = {
 
 ### 3.3 Checkout Session Create
 
-**Endpoint:** `POST {UCP_MERCHANT_URL}/wp-json/ucp/v1/checkout-sessions`
+**Endpoint:** `POST {UCP_CHECKOUT_URL}`
 **Auth:** `X-API-Key: {UCP_API_KEY}`
 **Triggered:** When user taps "Checkout" from CART.
 **Request body (§ CheckoutRequest):**
@@ -160,7 +164,7 @@ context.user_data = {
 
 ### 3.4 Checkout Session Update
 
-**Endpoint:** `PUT {UCP_MERCHANT_URL}/wp-json/ucp/v1/checkout-sessions/{id}`
+**Endpoint:** `PUT {UCP_CHECKOUT_URL}/{id}`
 **Auth:** `X-API-Key: {UCP_API_KEY}`
 **Note:** Full replacement — send complete checkout object including all previously set fields.
 **Triggered:** After shipping address is collected (CHECKOUT_ADDRESS → CHECKOUT_SHIPPING).
@@ -168,7 +172,7 @@ context.user_data = {
 
 ### 3.5 Checkout Session Complete
 
-**Endpoint:** `POST {UCP_MERCHANT_URL}/wp-json/ucp/v1/checkout-sessions/{id}/complete`
+**Endpoint:** `POST {UCP_CHECKOUT_URL}/{id}/complete`
 **Auth:** `X-API-Key: {UCP_API_KEY}`
 **Triggered:** "Confirm & Place Order" in CHECKOUT_CONFIRM.
 **Request body:**
@@ -188,7 +192,7 @@ If `UCP_PAYMENT_TOKEN` is not configured, the body is `{}` (relies on COD/manual
 
 ### 3.6 Checkout Session Cancel
 
-**Endpoint:** `POST {UCP_MERCHANT_URL}/wp-json/ucp/v1/checkout-sessions/{id}/cancel`
+**Endpoint:** `POST {UCP_CHECKOUT_URL}/{id}/cancel`
 **Auth:** `X-API-Key: {UCP_API_KEY}`
 **Triggered:** User sends `/cancel` while in CHECKOUT_* states, or conversation timeout.
 **Errors are swallowed** (best-effort cancel); always clear `user_data`.
@@ -401,8 +405,11 @@ class UCPManifest(BaseModel):
 - All secrets are loaded from environment variables only.
 - `.env` is in `.gitignore` — never committed.
 - Railway environment variables are set via the Railway dashboard.
-- Required at startup (pydantic-settings raises `ValidationError` if missing): `TELEGRAM_BOT_TOKEN`, `UCP_MERCHANT_URL`, `UCP_API_KEY`.
-- `TELEGRAM_WEBHOOK_SECRET` is required when `USE_POLLING=false`.
+- Required at startup (pydantic-settings raises `ValidationError` if missing):
+  `TELEGRAM_BOT_TOKEN`, `UCP_BASE_URL`, `UCP_API_KEY`.
+- OAuth linking additionally requires `UCP_CLIENT_ID`, `UCP_OAUTH_AUTHORIZE`, `UCP_OAUTH_TOKEN`,
+  `UCP_REDIRECT_URI`, and `DB_URL` (token store). `TELEGRAM_WEBHOOK_SECRET` is required when
+  `USE_POLLING=false`.
 
 ### 5.2 Webhook Verification
 
@@ -449,10 +456,24 @@ Values are read from environment variables (case-insensitive); `.env` file is au
 |---|---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | str | Yes | — | BotFather token |
 | `TELEGRAM_WEBHOOK_SECRET` | str | If not polling | — | Webhook verification token |
-| `WEBHOOK_URL` | str | If not polling | — | Public HTTPS URL (no trailing slash) |
-| `UCP_MERCHANT_URL` | str | Yes | — | WooCommerce store base URL |
+| `TELEGRAM_WEBHOOK_URL` | str | If not polling | — | Public HTTPS base URL (no trailing slash) |
+| `UCP_BASE_URL` | str | Yes | — | `https://retrohardware.arananet.net/wp-json/ucp/v1` |
+| `UCP_CHECKOUT_URL` | str | No | derived | Override for checkout sessions endpoint |
+| `UCP_CUSTOMER_PROFILE_URL` | str | No | derived | `.../customers/me` endpoint |
+| `UCP_DISCOVERY_URL` | str | No | derived | `.../.well-known/ucp` endpoint |
 | `UCP_API_KEY` | str | Yes | — | X-API-Key for UCP authenticated endpoints |
+| `UCP_CLIENT_ID` | str | If OAuth | — | OAuth client ID from WooCommerce |
+| `UCP_CLIENT_SECRET` | str | Optional | — | OAuth client secret (blank when PKCE only) |
+| `UCP_REDIRECT_URI` | str | If OAuth | — | HTTPS callback URL handled by this bot |
+| `UCP_OAUTH_SCOPE` | str | If OAuth | `checkout` | Scope parameter for authorize/token |
+| `UCP_OAUTH_AUTHORIZE` | str | If OAuth | — | `.../oauth/authorize` endpoint |
+| `UCP_OAUTH_TOKEN` | str | If OAuth | — | `.../oauth/token` endpoint |
+| `UCP_OAUTH_REVOKE` | str | If OAuth | — | `.../oauth/revoke` endpoint |
 | `UCP_PAYMENT_TOKEN` | str | No | None | Payment token for complete endpoint |
+| `DB_URL` | str | If OAuth | — | Database DSN for storing OAuth tokens/sessions |
+| `STRIPE_SECRET_KEY` | str | Optional | — | PSP secret used to mint payment tokens |
+| `STRIPE_WEBHOOK_SECRET` | str | Optional | — | Stripe webhook signature |
+| `AP2_CREDENTIALS_JSON` | str | Optional | — | Wallet/AP2 credential blob |
 | `PORT` | int | No | 8080 | HTTP server port (Railway sets this) |
 | `USE_POLLING` | bool | No | false | Use long-polling instead of webhook |
 | `LOG_LEVEL` | str | No | INFO | Python logging level |
@@ -467,7 +488,7 @@ Values are read from environment variables (case-insensitive); `.env` file is au
 
 1. Push to GitHub → Railway auto-deploys from main branch.
 2. Set all required env vars in Railway dashboard (Settings → Variables).
-3. `WEBHOOK_URL` = Railway's public domain, e.g. `https://telegram-ucp-agent.up.railway.app`.
+3. `TELEGRAM_WEBHOOK_URL` = Railway's public domain, e.g. `https://telegram-ucp-agent.up.railway.app`.
 4. `USE_POLLING=false` (default).
 5. Health check: `GET /health` → `200 {"status": "ok"}`.
 6. Bot registers its webhook URL on startup via `run_webhook()`.
@@ -476,7 +497,7 @@ Values are read from environment variables (case-insensitive); `.env` file is au
 
 ```bash
 cp .env.example .env
-# Edit .env: set TELEGRAM_BOT_TOKEN, UCP_MERCHANT_URL, UCP_API_KEY, USE_POLLING=true
+# Edit .env: set TELEGRAM_BOT_TOKEN, UCP_BASE_URL, UCP_API_KEY, USE_POLLING=true
 
 pip install -e ".[dev]"
 python -m src.main
@@ -527,3 +548,73 @@ Before each release, verify:
 - [ ] No secrets appear in logs
 - [ ] `/health` returns `200`
 - [ ] Webhook secret verified (test with wrong token → 403)
+### 2.5 OAuth Linking Flow
+
+1. User sends `/link`.
+2. Bot generates a PKCE code-verifier, persists a pending OAuth session (state, verifier, user_id),
+   and replies with a button linking to `UCP_OAUTH_AUTHORIZE` with the configured scope and redirect_uri.
+3. Merchant redirects back to `UCP_REDIRECT_URI` → handled by `GET /oauth/callback` on the bot.
+4. Callback exchanges the authorization code for access/refresh tokens at `UCP_OAUTH_TOKEN`, stores
+   them alongside their expiry and scope, fetches `UCP_CUSTOMER_PROFILE_URL` using the access token,
+   and notifies the Telegram user.
+5. During `/link`, if tokens already exist they are overwritten.
+6. `/unlink` deletes any stored token + cached profile and (best-effort) calls
+   `UCP_OAUTH_REVOKE` with the refresh token. Response errors are logged but not shown to the user.
+
+Autofill rules:
+- When a user with a linked profile starts checkout, address collection is skipped and the stored
+  profile populates `Buyer` and `Address` fields automatically.
+- If the stored profile is missing required fields, the bot falls back to manual prompts.
+- Access tokens are refreshed automatically using the stored refresh token when they expire.
+### 3.8 OAuth + Customer Profiles
+
+- **Authorize endpoint:** `GET {UCP_OAUTH_AUTHORIZE}` (external browser). Parameters: `response_type=code`,
+  `client_id={UCP_CLIENT_ID}`, `redirect_uri={UCP_REDIRECT_URI}`, `scope={UCP_OAUTH_SCOPE}`,
+  `code_challenge`, `code_challenge_method=S256`, `state` (opaque string tying to Telegram user).
+- **Token exchange:** `POST {UCP_OAUTH_TOKEN}` with `application/x-www-form-urlencoded` payload:
+
+  | Field | Value |
+  |---|---|
+  | `grant_type` | `authorization_code` |
+  | `client_id` | `UCP_CLIENT_ID` |
+  | `client_secret` | optional; include if `UCP_CLIENT_SECRET` set |
+  | `redirect_uri` | `UCP_REDIRECT_URI` |
+  | `code` | value received at callback |
+  | `code_verifier` | stored PKCE verifier |
+
+  Response shape:
+
+  ```json
+  {
+    "access_token": "ucp_access_...",
+    "refresh_token": "ucp_refresh_...",
+    "expires_in": 3600,
+    "token_type": "Bearer",
+    "scope": "checkout"
+  }
+  ```
+
+- **Refresh:** `POST {UCP_OAUTH_TOKEN}` with `grant_type=refresh_token`, `refresh_token`, `scope`, and
+  optional `client_secret`. Triggered automatically when cached access tokens expire.
+- **Revoke:** `POST {UCP_OAUTH_REVOKE}` with `token={refresh_token}` and `client_id` (and
+  `client_secret` when provided). Errors are logged but do not block unlinking.
+- **Customer profile:** `GET {UCP_CUSTOMER_PROFILE_URL}` with
+  `Authorization: Bearer {access_token}`. Expected fields:
+
+  ```json
+  {
+    "id": 123,
+    "email": "buyer@example.com",
+    "first_name": "Buyer",
+    "last_name": "Example",
+    "shipping": {
+      "address_1": "123 Main",
+      "city": "Springfield",
+      "state": "IL",
+      "postcode": "62701",
+      "country": "US"
+    }
+  }
+  ```
+
+  Missing fields result in a fallback to manual address prompts (SPEC §2.5).

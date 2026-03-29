@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from urllib.parse import urljoin
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,12 +29,30 @@ class Settings(BaseSettings):
     # ── Telegram ──────────────────────────────────────────────────────────────
     telegram_bot_token: str
     telegram_webhook_secret: str = ""
-    webhook_url: str = ""
+    telegram_webhook_url: str = ""
 
     # ── UCP Merchant ──────────────────────────────────────────────────────────
-    ucp_merchant_url: str
+    ucp_base_url: str
+    ucp_checkout_url: str | None = None
+    ucp_customer_profile_url: str | None = None
+    ucp_discovery_url: str | None = None
     ucp_api_key: str
+    ucp_client_id: str | None = None
+    ucp_client_secret: str | None = None
+    ucp_redirect_uri: str | None = None
+    ucp_oauth_scope: str | None = None
+    ucp_oauth_authorize: str | None = None
+    ucp_oauth_token: str | None = None
+    ucp_oauth_revoke: str | None = None
     ucp_payment_token: str | None = None
+
+    # ── Persistence ───────────────────────────────────────────────────────────
+    db_url: str | None = None
+
+    # ── PSP / payment providers ───────────────────────────────────────────────
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+    ap2_credentials_json: str | None = None
 
     # ── Runtime ───────────────────────────────────────────────────────────────
     port: int = 8080
@@ -46,15 +65,23 @@ class Settings(BaseSettings):
 
     # ── Validators ────────────────────────────────────────────────────────────
 
-    @field_validator("ucp_merchant_url", mode="before")
+    @field_validator(
+        "ucp_base_url",
+        "ucp_checkout_url",
+        "ucp_customer_profile_url",
+        "ucp_discovery_url",
+        "ucp_redirect_uri",
+        "ucp_oauth_authorize",
+        "ucp_oauth_token",
+        "ucp_oauth_revoke",
+        "telegram_webhook_url",
+        mode="before",
+    )
     @classmethod
     def strip_trailing_slash(cls, v: str) -> str:
-        return v.rstrip("/")
-
-    @field_validator("webhook_url", mode="before")
-    @classmethod
-    def strip_webhook_trailing_slash(cls, v: str) -> str:
-        return v.rstrip("/") if v else v
+        if isinstance(v, str):
+            return v.rstrip("/")
+        return v
 
     @model_validator(mode="after")
     def _check_webhook_fields(self) -> "Settings":
@@ -63,8 +90,16 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "TELEGRAM_WEBHOOK_SECRET is required when USE_POLLING=false"
                 )
-            if not self.webhook_url:
-                raise ValueError("WEBHOOK_URL is required when USE_POLLING=false")
+            if not self.telegram_webhook_url:
+                raise ValueError("TELEGRAM_WEBHOOK_URL is required when USE_POLLING=false")
+
+        base = self.ucp_base_url.rstrip("/")
+        if not self.ucp_discovery_url:
+            self.ucp_discovery_url = urljoin(base + "/", "/.well-known/ucp")
+        if not self.ucp_checkout_url:
+            self.ucp_checkout_url = f"{base}/checkout-sessions"
+        if not self.ucp_customer_profile_url:
+            self.ucp_customer_profile_url = f"{base}/customers/me"
         return self
 
 
