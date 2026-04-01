@@ -46,6 +46,8 @@ def _user_message_for_status(status_code: int, body: dict) -> str:
         msgs = body.get("messages") or body.get("errors") or []
         if msgs and isinstance(msgs, list) and msgs[0].get("content"):
             return msgs[0]["content"]
+        if body.get("message"):
+            return body["message"]
         return "Invalid request."
     if status_code == 401:
         return "Authentication error — please contact the admin."
