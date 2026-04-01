@@ -107,6 +107,12 @@ async def _auto_provision_payment_token(
         logger.info("Delegated payment intent failed: %s", exc.message)
         return
 
+    intent_status = intent.get("status")
+    ready_statuses = {"requires_capture", "requires_confirmation", "processing", "succeeded"}
+    if intent_status and intent_status not in ready_statuses:
+        logger.info("Delegated intent not ready (status=%s); falling back to manual token.", intent_status)
+        return
+
     token_payload = intent.get("payment_token")
     if token_payload:
         context.user_data["payment_token"] = token_payload
