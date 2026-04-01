@@ -189,7 +189,10 @@ context.user_data = {
 }
 ```
 
-If `UCP_PAYMENT_TOKEN` is not configured, the body is `{}` (relies on COD/manual gateway).
+If `UCP_PAYMENT_TOKEN` is not configured, the bot first calls
+`POST /payments/intent` to obtain a delegated PSP token and places
+the returned object in `payment.payment_token`. Only if that call fails
+does it prompt the user for a manual token or fall back to COD/manual flows.
 **On `200` + `status == "completed"`:** Proceed to ORDER_DONE.
 **On `402`:** Payment failed — show error, stay in CHECKOUT_CONFIRM.
 **On `409`:** Session not in `ready_for_complete` — re-fetch session and re-render.
@@ -326,7 +329,7 @@ class CheckoutSession(BaseModel):
 ```python
 class PaymentRequest(BaseModel):
     mandate: str | None = None          # AP2 mandate
-    payment_token: str | None = None    # Stripe or other gateway token
+    payment_token: str | dict | None = None    # PSP token/intention
     # Both fields are optional; omit entirely for COD/manual payment
 ```
 
@@ -473,7 +476,8 @@ Values are read from environment variables (case-insensitive); `.env` file is au
 | `UCP_OAUTH_AUTHORIZE` | str | If OAuth | — | `.../oauth/authorize` endpoint |
 | `UCP_OAUTH_TOKEN` | str | If OAuth | — | `.../oauth/token` endpoint |
 | `UCP_OAUTH_REVOKE` | str | If OAuth | — | `.../oauth/revoke` endpoint |
-| `UCP_PAYMENT_TOKEN` | str | No | None | Payment token for complete endpoint |
+| `UCP_PAYMENT_TOKEN` | str | No | None | Static payment token (skip delegated intents) |
+| `UCP_PAYMENT_GATEWAY` | str | No | None | Force gateway when requesting delegated intents |
 | `DB_URL` | str | If OAuth | — | Database DSN for storing OAuth tokens/sessions |
 | `STRIPE_SECRET_KEY` | str | Optional | — | PSP secret used to mint payment tokens |
 | `STRIPE_WEBHOOK_SECRET` | str | Optional | — | Stripe webhook signature |

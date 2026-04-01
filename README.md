@@ -18,6 +18,7 @@ A Telegram bot that acts as a shopping agent using the [Universal Commerce Proto
 - Add/remove items from cart
 - Full checkout flow: shipping address → shipping method → confirmation
 - Optional OAuth linking to autofill customer profiles
+- Automatic delegated PSP tokens via `/payments/intent` (no manual token prompt)
 - UCP session lifecycle management (create → update → complete / cancel)
 - Webhook mode for Railway, polling mode for local development
 - Input validation and per-user rate limiting
@@ -75,6 +76,7 @@ pytest tests/ -v
 | `UCP_BASE_URL` | WooCommerce UCP REST base (e.g. `https://retrohardware.arananet.net/wp-json/ucp/v1`) |
 | `UCP_API_KEY` | UCP API key from plugin settings |
 | `UCP_PAYMENT_TOKEN` | *(Optional)* Payment token for gateway; omit for COD |
+| `UCP_PAYMENT_GATEWAY` | *(Optional)* Force PSP for delegated intents (`stripe`, `paypal`, etc.) |
 | `UCP_CLIENT_ID` | *(OAuth)* Client ID from WooCommerce UCP OAuth page |
 | `UCP_CLIENT_SECRET` | *(OAuth, optional)* Only when WooCommerce requires a secret |
 | `UCP_REDIRECT_URI` | *(OAuth)* HTTPS callback handled by this bot (e.g. `https://bot.example.com/oauth/callback`) |
@@ -89,6 +91,14 @@ pytest tests/ -v
 
 4. Railway auto-deploys from main branch. The bot registers its webhook on startup.
 5. Health check: `GET /health` → `200 {"status": "ok"}`
+
+### Delegated payments
+
+When `UCP_PAYMENT_TOKEN` is unset, the bot automatically calls
+`POST /wp-json/ucp/v1/payments/intent` after shipping is selected to obtain a
+short-lived PSP token. Set `UCP_PAYMENT_GATEWAY=stripe` (or another handler) if
+the merchant exposes multiple gateways. The bot only prompts the user for a
+manual token when delegated intents fail or when COD/manual payment is required.
 
 ---
 

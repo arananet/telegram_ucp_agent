@@ -324,7 +324,7 @@ class PaymentRequest(BaseModel):
     See SPEC.md §3.5.
     """
     mandate: str | None = None       # AP2 mandate
-    payment_token: str | None = None  # Stripe or other gateway token
+    payment_token: str | dict[str, Any] | None = None  # PSP token or delegated intent
 
 
 # ── §4.6  Product Catalog ─────────────────────────────────────────────────────

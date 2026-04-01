@@ -19,6 +19,7 @@ context.user_data["address_input"], then assembled into an Address.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from telegram import Update
@@ -77,6 +78,39 @@ def _address_field_index(field_name: str) -> int:
         if field == field_name:
             return idx
     return -1
+
+
+async def _auto_provision_payment_token(
+    session: CheckoutSession,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Attempt to create a delegated PSP token via /payments/intent."""
+    settings = context.bot_data["settings"]
+    if settings.ucp_payment_token:
+        return
+
+    if context.user_data.get("payment_token"):
+        return
+
+    totals = session.totals
+    if not totals or totals.total <= 0:
+        return
+
+    ucp: UCPClient = context.bot_data["ucp_client"]
+    try:
+        intent = await ucp.create_payment_intent(
+            amount=totals.total,
+            currency=session.currency,
+            gateway=settings.ucp_payment_gateway,
+        )
+    except UCPError as exc:
+        logger.info("Delegated payment intent failed: %s", exc.message)
+        return
+
+    token_payload = intent.get("payment_token")
+    if token_payload:
+        context.user_data["payment_token"] = token_payload
+        context.user_data["auto_payment_intent"] = intent
 
 
 def _format_address_progress(address_input: dict) -> str:
@@ -346,6 +380,10 @@ async def on_shipping_selected(update: Update, context: ContextTypes.DEFAULT_TYP
     configured_token = settings.ucp_payment_token
     stored_token = context.user_data.get("payment_token")
 
+    if not configured_token and not stored_token:
+        await _auto_provision_payment_token(session, context)
+        stored_token = context.user_data.get("payment_token")
+
     if configured_token or stored_token:
         await query.edit_message_text(summary, reply_markup=confirm_keyboard(), parse_mode="Markdown")
         return State.CHECKOUT_CONFIRM
@@ -355,10 +393,23 @@ async def on_shipping_selected(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def on_payment_token_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    token = update.message.text.strip() if update.message else ""
-    if not token:
+    token_text = update.message.text.strip() if update.message else ""
+    if not token_text:
         await update.message.reply_text("Payment token cannot be empty. Please enter a valid token:")
         return State.CHECKOUT_PAYMENT
+
+    token: str | dict
+    if token_text.startswith("{"):
+        try:
+            parsed = json.loads(token_text)
+            if isinstance(parsed, dict):
+                token = parsed
+            else:
+                token = token_text
+        except json.JSONDecodeError:
+            token = token_text
+    else:
+        token = token_text
 
     context.user_data["payment_token"] = token
 

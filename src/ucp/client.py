@@ -81,6 +81,7 @@ class UCPClient:
         self._checkout_url = (checkout_url or f"{self._base}/checkout-sessions").rstrip("/")
         self._discovery_url = discovery_url or urljoin(self._base + "/", "/.well-known/ucp")
         self._customer_profile_url = customer_profile_url
+        self._payments_url = f"{self._base}/payments"
         self._client = httpx.AsyncClient(
             timeout=_TIMEOUT,
             headers={"User-Agent": "telegram-ucp-agent/1.0"},
@@ -243,6 +244,29 @@ class UCPClient:
         url = f"{self._checkout_url}/{session_id}/complete"
         data = await self._post(url, body=body)
         return CheckoutSession.model_validate(data)
+
+    # ── §3.5a  Delegated Payments Helper ──────────────────────────────────────
+
+    async def create_payment_intent(
+        self,
+        *,
+        amount: float,
+        currency: str,
+        gateway: str | None = None,
+    ) -> dict:
+        """
+        POST /wp-json/ucp/v1/payments/intent — auth required.
+        Returns a PSP token/intention the agent can pass to /complete.
+        """
+        body: dict[str, Any] = {
+            "amount": round(float(amount), 2),
+            "currency": currency,
+        }
+        if gateway:
+            body["gateway"] = gateway
+
+        url = f"{self._payments_url}/intent"
+        return await self._post(url, body=body)
 
     # ── §3.6  Cancel Checkout Session ─────────────────────────────────────────
 

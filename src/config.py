@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     ucp_oauth_token: str | None = None
     ucp_oauth_revoke: str | None = None
     ucp_payment_token: str | None = None
+    ucp_payment_gateway: str | None = None
 
     # ── Persistence ───────────────────────────────────────────────────────────
     db_url: str | None = None
